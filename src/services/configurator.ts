@@ -1,0 +1,173 @@
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as core from '@actions/core';
+import * as io from '@actions/io';
+import type { IMacPortsSettings } from '../models/settings';
+import type { IExecUtil } from '../utils/exec';
+
+/**
+ * MacPorts Configurator Service
+ *
+ * Handles writing MacPorts configuration files
+ */
+export class MacPortsConfigurator {
+  constructor(private execUtil: IExecUtil) {}
+
+  /**
+   * Configure MacPorts - write all config files and initialize registry
+   *
+   * @param settings - MacPorts settings
+   * @param gitSourcesPath - Optional path to local git sources
+   */
+  async configure(
+    settings: IMacPortsSettings,
+    gitSourcesPath?: string
+  ): Promise<void> {
+    // Write configuration files
+    await this.writeMacPortsConf(settings);
+    await this.writeVariantsConf(settings);
+    await this.writeSourcesConf(settings, gitSourcesPath);
+
+    // Create directory structure
+    await this.createDirectoryStructure(settings);
+
+    // Initialize the registry by running port version
+    await this.initializeRegistry(settings);
+  }
+
+  /**
+   * Write macports.conf configuration file
+   */
+  private async writeMacPortsConf(settings: IMacPortsSettings): Promise<void> {
+    const etcDir = path.join(settings.prefix, 'etc', 'macports');
+    const confPath = path.join(etcDir, 'macports.conf');
+
+    core.debug(`Writing macports.conf to: ${confPath}`);
+
+    await io.mkdirP(etcDir);
+
+    const config = [
+      `prefix ${settings.prefix}`,
+      `portdbpath ${path.join(settings.prefix, 'var', 'macports', 'portdbpath')}`,
+      `sources_conf ${path.join(settings.prefix, 'etc', 'macports', 'sources.conf')}`,
+      '',
+      settings.signatureCheck ? 'signature_check yes' : 'signature_check no',
+      ''
+    ];
+
+    await fs.writeFile(confPath, config.join('\n'), { mode: 0o644 });
+
+    core.debug(`macports.conf written successfully`);
+  }
+
+  /**
+   * Write variants.conf configuration file
+   */
+  private async writeVariantsConf(settings: IMacPortsSettings): Promise<void> {
+    const etcDir = path.join(settings.prefix, 'etc', 'macports');
+    const confPath = path.join(etcDir, 'variants.conf');
+
+    core.debug(`Writing variants.conf to: ${confPath}`);
+
+    await io.mkdirP(etcDir);
+
+    const lines: string[] = [];
+
+    // Add selected variants with + prefix
+    for (const variant of settings.variants.select) {
+      lines.push(`+${variant}`);
+    }
+
+    // Add deselected variants with - prefix
+    for (const variant of settings.variants.deselect) {
+      lines.push(`-${variant}`);
+    }
+
+    const content = lines.length > 0 ? lines.join('\n') + '\n' : '';
+
+    await fs.writeFile(confPath, content, { mode: 0o644 });
+
+    core.debug(`variants.conf written: ${content || '(empty)'}`);
+  }
+
+  /**
+   * Write sources.conf configuration file
+   */
+  private async writeSourcesConf(
+    settings: IMacPortsSettings,
+    gitSourcesPath?: string
+  ): Promise<void> {
+    const etcDir = path.join(settings.prefix, 'etc', 'macports');
+    const confPath = path.join(etcDir, 'sources.conf');
+
+    core.debug(`Writing sources.conf to: ${confPath}`);
+
+    await io.mkdirP(etcDir);
+
+    let lines: string[] = [];
+
+    if (gitSourcesPath) {
+      // Use local git sources as default
+      lines.push(`file://${gitSourcesPath}/ [default]`);
+      core.debug(`Using git sources from: ${gitSourcesPath}`);
+    } else if (settings.sources.length > 0) {
+      // Use custom sources
+      lines = [...settings.sources];
+      core.debug(`Using custom sources: ${settings.sources.join(', ')}`);
+    } else {
+      // Use default MacPorts rsync source
+      lines.push(
+        'rsync://rsync.macports.org/macports/release/tarballs/ports.tar [default]'
+      );
+      core.debug('Using default MacPorts rsync source');
+    }
+
+    const content = lines.join('\n') + '\n';
+
+    await fs.writeFile(confPath, content, { mode: 0o644 });
+
+    core.debug(`sources.conf written: ${content}`);
+  }
+
+  /**
+   * Create the MacPorts directory structure
+   */
+  private async createDirectoryStructure(
+    settings: IMacPortsSettings
+  ): Promise<void> {
+    core.debug(`Creating directory structure for: ${settings.prefix}`);
+
+    const directories = [
+      path.join(settings.prefix, 'etc', 'macports'),
+      path.join(settings.prefix, 'var', 'macports', 'portdbpath', 'registry'),
+      path.join(settings.prefix, 'var', 'macports', 'sources'),
+      path.join(settings.prefix, 'var', 'macports', 'dist')
+    ];
+
+    for (const dir of directories) {
+      await io.mkdirP(dir);
+      core.debug(`Created directory: ${dir}`);
+    }
+  }
+
+  /**
+   * Initialize the MacPorts registry
+   */
+  private async initializeRegistry(settings: IMacPortsSettings): Promise<void> {
+    const portBinary = path.join(settings.prefix, 'bin', 'port');
+    core.info('Initializing MacPorts registry...');
+
+    try {
+      await this.execUtil.exec(portBinary, ['version'], { silent: true });
+    } catch (err) {
+      core.debug(`Port version output: ${(err as any)?.message ?? err}`);
+    }
+
+    // Run port sync to initialize the registry and update PortIndex
+    core.info('Running port sync to initialize registry...');
+    const syncArgs = settings.verbose ? ['-v', 'sync'] : ['sync'];
+    await this.execUtil.exec(portBinary, syncArgs, { silent: false });
+
+    core.info('MacPorts registry initialized successfully');
+  }
+}

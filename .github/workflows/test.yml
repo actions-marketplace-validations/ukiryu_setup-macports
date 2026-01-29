@@ -1,0 +1,187 @@
+name: Test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: '30 3 * * 4'  # Weekly on Thursday
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Quick tests on all platforms
+  quick-test:
+    name: Quick tests (Node ${{ matrix.node-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node-version: [20.x]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format-check
+
+      - name: Run unit tests
+        run: npm test
+
+  # Build verification
+  build:
+    name: Verify build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Compare dist
+        run: |
+          if [ "$(git diff --name-only | grep dist/ | wc -l)" -gt "0" ]; then
+            echo "🔍 The following files have uncommitted changes:"
+            git diff --name-only
+            echo ""
+            echo "📦 Dist folder size:"
+            du -sh dist/
+            echo ""
+            echo "⚠️ Files changed since last commit:"
+            git diff --stat
+            exit 1
+          fi
+
+  # Comprehensive macOS tests with matrix
+  test-macos:
+    name: macOS ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS 14 Sonoma (ARM64)
+          - runner: macos-14
+            label: '14-Sonoma-ARM'
+            version: '14'
+            arch: 'arm64'
+          # macOS 15 Sequoia (ARM64)
+          - runner: macos-15
+            label: '15-Sequoia-ARM'
+            version: '15'
+            arch: 'arm64'
+          # macOS 15 Sequoia (Intel x64)
+          - runner: macos-15-intel
+            label: '15-Sequoia-Intel'
+            version: '15'
+            arch: 'x86_64'
+          # macOS 26 Tahoe (ARM64)
+          - runner: macos-26
+            label: '26-Tahoe-ARM'
+            version: '26'
+            arch: 'arm64'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Detect platform
+        id: platform
+        run: |
+          echo "version=$(sw_vers -productVersion | cut -d. -f1)" >> $GITHUB_OUTPUT
+          echo "arch=$(uname -m)" >> $GITHUB_OUTPUT
+          echo "macos_name=$(sw_vers -productName)" >> $GITHUB_OUTPUT
+
+      - name: Test basic installation
+        uses: ./dist
+        with:
+          macports-version: '2.11.5'
+          debug: 'true'
+
+      - name: Verify basic installation
+        run: |
+          set -x
+          /opt/local/bin/port version
+          [ -x /opt/local/bin/port ] || exit 1
+          echo "✅ Port binary exists and is executable"
+
+      - name: Test with variants
+        uses: ./dist
+        with:
+          macports-version: '2.11.5'
+          variants: '+aqua +metal -x11'
+
+      - name: Verify variants
+        run: |
+          cat /opt/local/etc/macports/variants.conf
+          grep -q '+aqua' /opt/local/etc/macports/variants.conf
+          grep -q '+metal' /opt/local/etc/macports/variants.conf
+          grep -q '-x11' /opt/local/etc/macports/variants.conf
+          echo "✅ Variants configured correctly"
+
+      - name: Test git sources
+        uses: ./dist
+        with:
+          macports-version: '2.11.5'
+          use-git-sources: 'true'
+
+      - name: Verify git sources
+        run: |
+          [ -d /opt/local/var/macports/sources/github.com/macports/macports-ports/.git ] || exit 1
+          grep -q 'file://.*macports-ports' /opt/local/etc/macports/sources.conf
+          echo "✅ Git sources configured"
+
+      - name: Test port installation
+        uses: ./dist
+        with:
+          macports-version: '2.11.5'
+          install-ports: 'git-lfs'
+
+      - name: Verify port installation
+        run: |
+          /opt/local/bin/port installed git-lfs
+          echo "✅ Port installation successful"
+
+      - name: Display platform info
+        run: |
+          echo "Platform: ${{ steps.platform.outputs.macos_name }}"
+          echo "Version: ${{ steps.platform.outputs.version }}"
+          echo "Architecture: ${{ steps.platform.outputs.arch }}"
+          echo "Runner: ${{ matrix.runner }}"
