@@ -16,5 +16,9 @@ jobs:
     name: Check licenses
     steps:
       - uses: actions/checkout@v6
-      - run: npm ci
+      - name: Install dependencies
+        run: |
+          for i in {1..3}; do
+            npm ci && break || sleep 10
+          done
       - run: npm run licensed-check
