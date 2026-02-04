@@ -1,6 +1,6 @@
 # MacPorts Full Setup
 
-[![build](https://github.com/ukiryu/setup-macports/workflows/test.yml/badge.svg)](https://github.com/ukiryu/setup-macports/actions/workflows/test.yml)
+[![build](https://github.com/ukiryu/setup-macports/actions/workflows/test.yml/badge.svg)](https://github.com/ukiryu/setup-macports/actions/workflows/test.yml)
 
 Complete MacPorts installation with full configuration control. Exposes all
 options as direct inputs—no external YAML configuration files required.
