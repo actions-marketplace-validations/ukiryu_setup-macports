@@ -1,8 +1,9 @@
-# Setup MacPorts
+# MacPorts Full Setup
 
 [![build](https://github.com/ukiryu/setup-macports/workflows/test.yml/badge.svg)](https://github.com/ukiryu/setup-macports/actions/workflows/test.yml)
 
-This action installs and configures [MacPorts](https://www.macports.org/) on macOS runners.
+Complete MacPorts installation with full configuration control. Exposes all
+options as direct inputs—no external YAML configuration files required.
 
 > **Note:** This action only supports macOS runners. MacPorts depends on the
 > official PKG installer which is macOS-specific. Using this action on other
@@ -16,6 +17,30 @@ This action installs and configures [MacPorts](https://www.macports.org/) on mac
 - Full TypeScript rewrite with comprehensive unit and integration tests
 - Support for all current macOS versions: Sonoma (14), Sequoia (15), Tahoe (26)
 - Support for both ARM64 (Apple Silicon) and Intel (x86_64) architectures
+
+## Design philosophy
+
+This action follows an **explicit inputs** approach—all configuration options are
+exposed directly as workflow inputs, keeping your workflow self-contained and
+declarative.
+
+| Configuration Style | This Action | Config-File Based Actions |
+|---------------------|-------------|---------------------------|
+| **Configuration** | Direct inputs in workflow | External YAML file |
+| **Port Sources** | Built-in git/rsync/custom providers | Manual sources.conf editing |
+| **Caching** | Integrated, automatic cache keys | Requires manual cache step |
+| **Port Installation** | Inline with per-port variants | Via config file only |
+| **Outputs** | 12 detailed (paths, configs) | 3 basic |
+
+**Use this action if you prefer:**
+- All configuration visible in the workflow file
+- Automatic caching with zero setup
+- Built-in git sources via GitHub API
+- Per-port variant control without external files
+
+**Consider config-file based actions if you prefer:**
+- Separating configuration from workflow logic
+- Reusable config files across multiple workflows
 
 ## Usage
 

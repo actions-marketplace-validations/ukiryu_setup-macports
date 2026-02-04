@@ -1,5 +1,10 @@
-name: 'Setup MacPorts'
-description: 'Install and configure MacPorts on macOS runners'
+name: 'MacPorts Full Setup'
+description: >-
+  MacPorts with git sources, variants, caching, and ports.
+  All options as direct inputs.
+branding:
+  icon: 'package'
+  color: 'blue'
 
 inputs:
   macports-version:
