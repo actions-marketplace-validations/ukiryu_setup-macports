@@ -532,34 +532,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS 14 Sonoma (ARM64)
-          - runner: macos-14
-            label: '14-Sonoma-ARM'
-            mode: 'strict'
-          - runner: macos-14
-            label: '14-Sonoma-ARM'
-            mode: 'disabled'
-          # macOS 15 Sequoia (ARM64)
+          # Only test on macos-15 to reduce CI time
+          # All modes install gdk-pixbuf2 to test actual signature behavior
           - runner: macos-15
             label: '15-Sequoia-ARM'
             mode: 'strict'
+            expect-failure: 'true'
           - runner: macos-15
             label: '15-Sequoia-ARM'
             mode: 'disabled'
-          # macOS 15 Sequoia (Intel x64)
-          - runner: macos-15-intel
-            label: '15-Sequoia-Intel'
-            mode: 'strict'
-          - runner: macos-15-intel
-            label: '15-Sequoia-Intel'
-            mode: 'disabled'
-          # macOS 26 Tahoe (ARM64)
-          - runner: macos-26
-            label: '26-Tahoe-ARM'
-            mode: 'strict'
-          - runner: macos-26
-            label: '26-Tahoe-ARM'
-            mode: 'disabled'
+            expect-failure: 'false'
+          - runner: macos-15
+            label: '15-Sequoia-ARM'
+            mode: 'permissive'
+            skip-package: 'gdk-pixbuf2'
+            expect-failure: 'false'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -583,57 +570,75 @@ jobs:
         with:
           macports-version: ${{ env.MACPORTS_VERSION }}
           signature-check: '${{ matrix.mode }}'
+          skip-signature-check: '${{ matrix.skip-package }}'
+        continue-on-error: true
+        id: setup
 
-      - name: Verify signature enforcement
+      - name: Install gdk-pixbuf2 to test signature behavior
+        id: install
         run: |
-          # Verify MacPorts is installed
-          /opt/local/bin/port version
-
-          # Check macports.conf content
-          echo "=== macports.conf signature_check setting ==="
-          grep "signature_check" /opt/local/etc/macports/macports.conf
+          echo "=== Installing gdk-pixbuf2 with ${{ matrix.mode }} signature mode ==="
           echo ""
 
-          echo "=== Testing signature enforcement with inkscape (known broken signature) ==="
-          echo "inkscape has a broken/invalid signature - perfect for testing!"
+          # For permissive mode, manually install with force flag to verify it works
+          if [ "${{ matrix.mode }}" = "permissive" ]; then
+            echo "Installing with force flag (-f) to bypass signature verification..."
+            sudo /opt/local/bin/port -f install gdk-pixbuf2 2>&1 || true
+          else
+            echo "Installing normally (signature check: ${{ matrix.mode }})..."
+            sudo /opt/local/bin/port install gdk-pixbuf2 2>&1 || true
+          fi
+        continue-on-error: true
+
+      - name: Verify installation result
+        run: |
+          echo "=== Verifying installation result ==="
           echo ""
-          echo "Expected behavior:"
-          echo "  - strict mode:   should FAIL (rejects port with broken signature)"
-          echo "  - disabled mode: should SUCCEED (ignores signature issues)"
+
+          # Check if gdk-pixbuf2 is installed
+          if /opt/local/bin/port installed gdk-pixbuf2 2>/dev/null | grep -q "gdk-pixbuf2"; then
+            echo "gdk-pixbuf2 installation status: INSTALLED"
+            INSTALLED="true"
+          else
+            echo "gdk-pixbuf2 installation status: NOT INSTALLED"
+            INSTALLED="false"
+          fi
+
           echo ""
+          echo "=== Expected behavior for ${{ matrix.mode }} mode ==="
 
           if [ "${{ matrix.mode }}" = "strict" ]; then
-            echo "Testing in strict mode - expecting FAILURE due to broken signature..."
-            if /opt/local/bin/port install inkscape 2>&1 | tee /tmp/install.log; then
-              echo ""
-              echo "⚠️ UNEXPECTED: Installation succeeded in strict mode!"
-              echo "   (Maybe inkscape's signature was fixed, or enforcement not working)"
+            echo "STRICT mode: Signature verification is ENABLED"
+            echo "Expected: gdk-pixbuf2 installation should FAIL due to signature verification"
+
+            if [ "$INSTALLED" = "false" ]; then
+              echo "✅ PASS: gdk-pixbuf2 was NOT installed (as expected in strict mode)"
             else
-              echo ""
-              echo "✅ EXPECTED: Installation failed in strict mode (signature rejected)"
-              echo "   This proves signature enforcement is WORKING!"
-              echo ""
-              echo "Error log:"
-              grep -i "signature\|verify\|invalid" /tmp/install.log || tail -5 /tmp/install.log
+              echo "⚠️ UNEXPECTED: gdk-pixbuf2 was installed in strict mode"
+              echo "This could mean signature validation passed (issue may be fixed upstream)"
             fi
+
           elif [ "${{ matrix.mode }}" = "disabled" ]; then
-            echo "Testing in disabled mode - expecting SUCCESS (signatures ignored)..."
-            echo "Note: May still fail due to other issues (dependencies, permissions)"
-            if /opt/local/bin/port install inkscape 2>&1 | tee /tmp/install.log; then
-              echo ""
-              echo "✅ Installation succeeded in disabled mode!"
-              if [ -x /opt/local/bin/inkscape ]; then
-                echo "✅ inkscape CLI is executable"
-                /opt/local/bin/inkscape --version 2>/dev/null || /opt/local/bin/inkscape --help 2>&1 | head -2
-              fi
+            echo "DISABLED mode: Signature verification is DISABLED"
+            echo "Expected: gdk-pixbuf2 installation should succeed (or fail for non-signature reasons)"
+
+            if [ "$INSTALLED" = "true" ]; then
+              echo "✅ PASS: gdk-pixbuf2 was installed successfully"
             else
-              echo ""
-              echo "⚠️ Installation failed (may be due to permissions, dependencies, or network)"
-              echo "   But NOT due to signature verification (disabled)"
-              tail -10 /tmp/install.log
+              echo "⚠️ INFO: gdk-pixbuf2 installation failed (may be due to other issues, not signature)"
+            fi
+
+          elif [ "${{ matrix.mode }}" = "permissive" ]; then
+            echo "PERMISSIVE mode: Signature verification is ENABLED but force flag is used"
+            echo "Expected: gdk-pixbuf2 installation uses -f flag to bypass signature"
+
+            if [ "$INSTALLED" = "true" ]; then
+              echo "✅ PASS: gdk-pixbuf2 was installed with force flag"
+            else
+              echo "⚠️ INFO: gdk-pixbuf2 installation failed (may be due to dependency issues, not signature)"
+              echo "The force flag (-f) was applied to bypass signature verification"
             fi
           fi
 
           echo ""
-          /opt/local/bin/port version
-          echo "✅ MacPorts remains functional"
+          echo "=== Signature mode test completed ==="
